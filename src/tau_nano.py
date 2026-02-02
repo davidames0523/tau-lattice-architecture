@@ -17,9 +17,16 @@ class LatticeRouter(nn.Module):
         self.dim = dim
 
     def __call__(self, x):
+        # Capture original shape: (Batch, Seq_Len, Dim)
+        B, L, D = x.shape
+        
         # 1. Project to Lattice Basin (SimHash)
+        # Flatten batch/seq to treat every token independently: (B*L, D)
+        flat_x = x.reshape(-1, D)
+        
         # Sum elements with stride to preserve locality
-        sums = mx.sum(x.reshape(-1, self.dim // 8, 8), axis=-1)
+        # Reshape to (B*L, D//8, 8) -> sum -> (B*L, D//8) -> sum -> (B*L,)
+        sums = mx.sum(flat_x.reshape(-1, self.dim // 8, 8), axis=-1)
         h = mx.sum(sums, axis=-1).astype(mx.uint32)
         basin_id = h % DIVISORS
         
@@ -29,7 +36,9 @@ class LatticeRouter(nn.Module):
         g = basin_id.astype(mx.float32)
         w1 = (base + g) / base
         
-        return x * w1.reshape(-1, 1)
+        # FIX: Reshape weight back to (Batch, Seq, 1) for broadcasting
+        # This aligns the scalar weight with the embedding dimension of each token
+        return x * w1.reshape(B, L, 1)
 
 class AttractorAttention(nn.Module):
     def __init__(self, dim, heads):
